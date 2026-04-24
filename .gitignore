@@ -1,13 +1,42 @@
+# Python virtual environments and caches
 .venv/
+venv/
+env/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# PyInstaller/build outputs
 build/
 build_diag/
 *.spec
+
+# Local app/user data
 config.json
 MoneCaptureData/
 captures/
+
+# Logs and diagnostics
 *.log
 hotkey_diagnostic.py
 HotkeyDiagnostic.exe
 hotkey_diagnostic_summary.txt
+
+# Local/editor/OS noise
+.env
+.env.*
+*.tmp
+*.temp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
