@@ -103,5 +103,5 @@ python -m venv .venv
 실행 파일 빌드:
 
 ```powershell
-.venv\Scripts\python -m PyInstaller --noconfirm --onefile --windowed --name RegionCapture --icon "$PWD\RegionCapture.ico" --add-data "$PWD\2d6c54dfa3e2bfd3.png;." --distpath . --workpath build --specpath build region_capture.py
+.venv\Scripts\python -m PyInstaller --clean --noconfirm --onefile --windowed --name RegionCapture --icon "$PWD\RegionCapture.ico" --add-data "$PWD\2d6c54dfa3e2bfd3.png;." --distpath . --workpath build --specpath build region_capture.py
 ```
