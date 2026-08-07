@@ -13,74 +13,111 @@
         <button id="reset">기본값 복원</button>
       </header>
 
-      <section>
-        <h2>기능</h2>
-        <div class="grid">
-          <label><input type="checkbox" data-option="screenshot"> 스크린샷</label>
-          <label><input type="checkbox" data-option="record"> 녹화</label>
-          <label><input type="checkbox" data-option="seek"> 5초 탐색</label>
-          <label><input type="checkbox" data-option="lowLatency"> 방송 딜레이 최소화</label>
-          <label><input type="checkbox" data-option="logPower"> 통나무 자동 수령/표시</label>
-          <label><input type="checkbox" data-option="toolbarVisible"> 화면 버튼 표시</label>
-          <label><input type="checkbox" data-option="continuousCapture"> 연속 캡쳐 모드</label>
+      <section class="panel">
+        <div class="section-head">
+          <h2>기능</h2>
+          <span class="section-note">켜고 끄기</span>
         </div>
-        <label class="field">
-          캡쳐 이전 시간
-          <input type="number" data-option="screenshotDelaySeconds" min="0.01" max="5" step="0.01">
-        </label>
-        <label class="field">
-          딜레이 모드
-          <select data-option="lowLatencyMode">
-            <option value="auto">자동(권장)</option>
-            <option value="fast">빠른 반응</option>
-            <option value="stable">안정 우선</option>
-            <option value="custom">직접 설정</option>
-          </select>
-        </label>
-        <label class="field">
-          플레이어 기준 목표 거리(초)
-          <input type="number" data-option="lowLatencyTargetSeconds" min="0" max="5" step="0.1">
-        </label>
-        <label class="field">
-          상태 확인 간격(초)
-          <input type="number" data-option="lowLatencyCheckSeconds" min="0.25" max="5" step="0.25">
-        </label>
-        <label class="field">
-          SHOT 연속 간격(ms)
-          <input type="number" data-option="continuousInstantCaptureIntervalMs" min="17" max="1000" step="1">
-        </label>
-        <label class="field">
-          BACK 연속 간격(ms)
-          <input type="number" data-option="continuousDelayedCaptureIntervalMs" min="17" max="1000" step="1">
-        </label>
-        <label class="field">
-          연속 시작 지연(ms)
-          <input type="number" data-option="continuousCaptureStartDelayMs" min="150" max="1500" step="50">
-        </label>
-        <label class="field">
-          BACK 캐시 시간
-          <input type="number" data-option="delayedFrameCacheSeconds" min="0.5" max="5" step="0.1">
-        </label>
-        <label class="field">
-          BACK 캐시 프리셋
-          <select data-option="delayedFrameCachePreset">
-            <option value="performance">저부하</option>
-            <option value="balanced">균형</option>
-            <option value="highspeed">고속</option>
-            <option value="original">원본</option>
-          </select>
-        </label>
-        <label class="field placement-field">
-          버튼 위치
-          <select data-option="toolbarPlacement">
-            <option value="info">영상 정보 오른쪽</option>
-            <option value="player">영상 오른쪽 아래</option>
-            <option value="viewport">브라우저 오른쪽 아래</option>
-          </select>
-        </label>
+        <div class="toggle-grid">
+          <label class="toggle"><input type="checkbox" data-option="screenshot"><span>스크린샷</span></label>
+          <label class="toggle"><input type="checkbox" data-option="record"><span>녹화</span></label>
+          <label class="toggle"><input type="checkbox" data-option="seek"><span>5초 탐색</span></label>
+          <label class="toggle"><input type="checkbox" data-option="lowLatency"><span>딜레이 최소화</span></label>
+          <label class="toggle"><input type="checkbox" data-option="logPower"><span>통나무 자동 수령</span></label>
+          <label class="toggle"><input type="checkbox" data-option="toolbarVisible"><span>화면 버튼</span></label>
+          <label class="toggle"><input type="checkbox" data-option="continuousCapture"><span>연속 캡쳐</span></label>
+          <label class="toggle muted"><input type="checkbox" data-option="logPowerDebug"><span>통나무 로그</span></label>
+        </div>
       </section>
 
-      <section>
+      <div class="settings-grid">
+        <section class="panel">
+          <div class="section-head">
+            <h2>캡쳐</h2>
+          </div>
+          <label class="field">
+            <span>BACK 이전 시간</span>
+            <input type="number" data-option="screenshotDelaySeconds" min="0.01" max="5" step="0.01">
+          </label>
+          <label class="field">
+            <span>BACK 캐시 시간</span>
+            <input type="number" data-option="delayedFrameCacheSeconds" min="0.5" max="5" step="0.1">
+          </label>
+          <label class="field">
+            <span>BACK 캐시 프리셋</span>
+            <select data-option="delayedFrameCachePreset">
+              <option value="performance">저부하</option>
+              <option value="balanced">균형</option>
+              <option value="highspeed">고속</option>
+              <option value="original">원본</option>
+            </select>
+          </label>
+          <details class="advanced">
+            <summary>연속 캡쳐</summary>
+            <label class="field">
+              <span>SHOT 간격(ms)</span>
+              <input type="number" data-option="continuousInstantCaptureIntervalMs" min="17" max="1000" step="1">
+            </label>
+            <label class="field">
+              <span>BACK 간격(ms)</span>
+              <input type="number" data-option="continuousDelayedCaptureIntervalMs" min="17" max="1000" step="1">
+            </label>
+            <label class="field">
+              <span>시작 지연(ms)</span>
+              <input type="number" data-option="continuousCaptureStartDelayMs" min="150" max="1500" step="50">
+            </label>
+          </details>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>딜레이</h2>
+          </div>
+          <label class="field">
+            <span>모드</span>
+            <select data-option="lowLatencyMode">
+              <option value="auto">자동(권장)</option>
+              <option value="fast">빠른 반응</option>
+              <option value="stable">안정 우선</option>
+              <option value="custom">직접 설정</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>목표 거리(초)</span>
+            <input type="number" data-option="lowLatencyTargetSeconds" min="0" max="5" step="0.1">
+          </label>
+          <label class="field">
+            <span>확인 간격(초)</span>
+            <input type="number" data-option="lowLatencyCheckSeconds" min="0.25" max="5" step="0.25">
+          </label>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>화면</h2>
+          </div>
+          <label class="field">
+            <span>버튼 위치</span>
+            <select data-option="toolbarPlacement">
+              <option value="info">영상 정보 오른쪽</option>
+              <option value="player">영상 오른쪽 아래</option>
+              <option value="viewport">브라우저 오른쪽 아래</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>통나무</h2>
+          </div>
+          <div class="actions compact">
+            <button id="copy-log-power-debug">로그 복사</button>
+            <button id="clear-log-power-debug" class="secondary">로그 삭제</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel">
         <h2>단축키</h2>
         <div class="shortcut-list">
           <div class="shortcut-row">
@@ -106,7 +143,7 @@
         </div>
       </section>
 
-      <section>
+      <section class="panel">
         <h2>저장</h2>
         <label class="field">
           저장 방식
