@@ -55,6 +55,21 @@ async function saveCurrentOptions(message = "저장됨") {
   setStatus(message);
 }
 
+async function appendLogPowerDebugEvent(event, details = {}) {
+  const data = await moneStorageGet([MONE_LOG_POWER_DEBUG_KEY]);
+  const events = Array.isArray(data[MONE_LOG_POWER_DEBUG_KEY]) ? data[MONE_LOG_POWER_DEBUG_KEY] : [];
+  events.push({
+    at: new Date().toISOString(),
+    event,
+    path: "options",
+    ...details,
+  });
+  if (events.length > 300) {
+    events.splice(0, events.length - 300);
+  }
+  await moneStorageSet({ [MONE_LOG_POWER_DEBUG_KEY]: events });
+}
+
 function renderFeatureOptions() {
   document.querySelectorAll("[data-option]").forEach((input) => {
     const key = input.dataset.option;
@@ -79,6 +94,10 @@ document.querySelectorAll("[data-option]").forEach((input) => {
     const key = input.dataset.option;
     currentOptions[key] = input.type === "checkbox" ? input.checked : input.type === "number" ? Number(input.value) : input.value;
     await saveCurrentOptions("옵션 저장됨");
+    if (key === "logPowerDebug" && currentOptions.logPowerDebug) {
+      await appendLogPowerDebugEvent("debug-option-enabled");
+      setStatus("통나무 디버그 로그 켜짐");
+    }
   });
 });
 
@@ -120,6 +139,27 @@ document.getElementById("select-folder").addEventListener("click", async () => {
       throw new Error(response?.error || "저장 폴더 선택 실패");
     }
     setStatus(response.result?.canceled ? "폴더 선택 취소" : "저장 폴더 선택됨");
+  } catch (error) {
+    setStatus(error.message || String(error));
+  }
+});
+
+document.getElementById("copy-log-power-debug").addEventListener("click", async () => {
+  try {
+    const data = await moneStorageGet([MONE_LOG_POWER_DEBUG_KEY]);
+    const events = Array.isArray(data[MONE_LOG_POWER_DEBUG_KEY]) ? data[MONE_LOG_POWER_DEBUG_KEY] : [];
+    const text = JSON.stringify(events, null, 2);
+    await navigator.clipboard.writeText(text);
+    setStatus(`통나무 로그 복사됨: ${events.length}개`);
+  } catch (error) {
+    setStatus(error.message || String(error));
+  }
+});
+
+document.getElementById("clear-log-power-debug").addEventListener("click", async () => {
+  try {
+    await moneStorageSet({ [MONE_LOG_POWER_DEBUG_KEY]: [] });
+    setStatus("통나무 로그 삭제됨");
   } catch (error) {
     setStatus(error.message || String(error));
   }

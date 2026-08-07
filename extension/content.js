@@ -52,7 +52,13 @@
   const LOG_POWER_CHECK_MS = 60000;
   const LOG_POWER_RETRY_MS = 15000;
   const LOG_POWER_CLAIM_REFRESH_MS = 900;
+  const LOG_POWER_BUTTON_SCAN_MS = 5000;
+  const LOG_POWER_BUTTON_SCAN_SLEEP_MS = 59 * 60 * 1000;
+  const LOG_POWER_DEBUG_LIMIT = 300;
+  const LOG_POWER_DEBUG_SCAN_IDLE_MS = 30000;
   const LOG_POWER_REWARD_AMOUNTS = new Set([100, 120, 200]);
+  const LOG_POWER_STATUS_TEXT_PATTERN = /성공|완료됨|받음|실패|닫기|확인/;
+  const LOG_POWER_CONTEXT_TEXT_PATTERN = /통나무|파워|1시간|시청/;
 
   let options = { ...MONE_DEFAULT_OPTIONS };
   let directoryHandle = null;
@@ -114,8 +120,13 @@
   let positionRaf = 0;
   let uiHealthTimer = 0;
   let logPowerTimer = 0;
+  let logPowerButtonScanTimer = 0;
   let logPowerAmount = null;
   let logPowerBusy = false;
+  let logPowerClickedButtons = new WeakMap();
+  let logPowerButtonScanSleepUntil = 0;
+  let logPowerLastScanDebugAt = 0;
+  let logPowerDebugWriteQueue = Promise.resolve();
   let nonCaptureActionRunning = "";
   let extensionDisposed = false;
   let shortcutAttached = false;
@@ -359,6 +370,40 @@
     return Math.max(0, Math.floor(value)).toLocaleString("ko-KR");
   }
 
+  function compactLogPowerDebugValue(value, maxLength = 180) {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+  }
+
+  function logPowerDebug(event, details = {}) {
+    if (!options.logPowerDebug) {
+      return;
+    }
+    const entry = {
+      at: new Date().toISOString(),
+      event,
+      path: location.pathname,
+      ...details,
+    };
+    console.info("MoneCapture log power debug", entry);
+    logPowerDebugWriteQueue = logPowerDebugWriteQueue
+      .catch(() => {})
+      .then(async () => {
+        const data = await moneStorageGet([MONE_LOG_POWER_DEBUG_KEY]);
+        const events = Array.isArray(data[MONE_LOG_POWER_DEBUG_KEY]) ? data[MONE_LOG_POWER_DEBUG_KEY] : [];
+        events.push(entry);
+        if (events.length > LOG_POWER_DEBUG_LIMIT) {
+          events.splice(0, events.length - LOG_POWER_DEBUG_LIMIT);
+        }
+        await moneStorageSet({ [MONE_LOG_POWER_DEBUG_KEY]: events });
+      })
+      .catch((error) => {
+        if (!moneIsExtensionContextInvalidated(error)) {
+          console.info("MoneCapture log power debug store skipped", error);
+        }
+      });
+  }
+
   function findLogPowerBadgeTarget() {
     const sendButton = document.getElementById("send_chat_or_donate") ||
       Array.from(document.querySelectorAll("button")).find((button) => {
@@ -418,8 +463,17 @@
     return badge;
   }
 
+  function normalizeLogPowerText(text) {
+    return String(text || "").replace(/\s+/g, " ").trim();
+  }
+
   function logPowerRewardAmountFromText(text) {
-    const match = String(text || "").replace(/\s+/g, " ").match(/(\d[\d,]*)\s*받기/);
+    const normalizedText = normalizeLogPowerText(text);
+    if (LOG_POWER_STATUS_TEXT_PATTERN.test(normalizedText)) {
+      return 0;
+    }
+    const matches = Array.from(normalizedText.matchAll(/(\d[\d,]*)\s*받기/g));
+    const match = matches[matches.length - 1];
     if (!match) {
       return 0;
     }
@@ -427,27 +481,95 @@
     return LOG_POWER_REWARD_AMOUNTS.has(amount) ? amount : 0;
   }
 
-  function isLogPowerClaimButton(button) {
-    if (!(button instanceof HTMLButtonElement) || button.disabled || visibleArea(button) <= 0) {
-      return false;
-    }
-    const buttonText = (button.textContent || "").replace(/\s+/g, " ").trim();
-    const rewardAmount = logPowerRewardAmountFromText(buttonText);
-    if (!rewardAmount) {
-      return false;
-    }
-    const scope = button.closest("[class*='_container_'], [class*='log'], [class*='power']") || button.parentElement || button;
-    const scopeText = (scope.textContent || buttonText).replace(/\s+/g, " ").trim();
-    return /통나무|파워|시청/.test(scopeText);
+  function logPowerChatAside() {
+    return document.querySelector("aside#aside-chatting") ||
+      document.querySelector("aside[aria-label='채팅']") ||
+      Array.from(document.querySelectorAll("aside")).find((aside) => /채팅|후원하기|통나무|파워/.test(aside.textContent || "")) ||
+      null;
   }
 
-  function findLogPowerClaimButtons(root = document) {
+  function logPowerButtonDirectText(button) {
+    return [
+      button.getAttribute("aria-label"),
+      button.getAttribute("title"),
+      button.value,
+      button.textContent,
+    ].map(normalizeLogPowerText).filter(Boolean).join(" ");
+  }
+
+  function logPowerButtonContextText(button) {
+    const texts = [];
+    let node = button;
+    for (let depth = 0; node instanceof Element && depth < 4; depth += 1, node = node.parentElement) {
+      const text = normalizeLogPowerText(node.textContent);
+      if (text) {
+        texts.push(text);
+      }
+      if (logPowerRewardAmountFromText(text) && LOG_POWER_CONTEXT_TEXT_PATTERN.test(text)) {
+        break;
+      }
+      if (node.matches("aside, [aria-label='채팅']") || text.length > 300) {
+        break;
+      }
+    }
+    return texts.join(" ");
+  }
+
+  function logPowerButtonHasKnownClass(button) {
+    return Array.from(button.classList || []).some((cls) =>
+      cls.startsWith("live_chatting_power_button__") ||
+      cls.includes("_power_button_") ||
+      cls.includes("_chatting_power_button_") ||
+      cls.includes("_live_chatting_power_button_") ||
+      cls.includes("power_button")
+    );
+  }
+
+  function logPowerButtonHasRejectedClass(button) {
+    return Array.from(button.classList || []).some((cls) =>
+      cls.includes("_highlight_") ||
+      cls.includes("_square_")
+    );
+  }
+
+  function logPowerClaimButtonInfo(button) {
+    if (!(button instanceof HTMLButtonElement) || button.disabled || visibleArea(button) <= 0) {
+      return null;
+    }
+    if (logPowerButtonHasRejectedClass(button)) {
+      return null;
+    }
+    const buttonText = logPowerButtonDirectText(button);
+    if (!buttonText || LOG_POWER_STATUS_TEXT_PATTERN.test(buttonText)) {
+      return null;
+    }
+    const rewardAmount = logPowerRewardAmountFromText(buttonText);
+    if (!rewardAmount) {
+      return null;
+    }
+    const contextText = logPowerButtonContextText(button);
+    const combinedText = `${buttonText} ${contextText}`;
+    if (!logPowerButtonHasKnownClass(button) && !LOG_POWER_CONTEXT_TEXT_PATTERN.test(combinedText)) {
+      return null;
+    }
+    return { button, text: buttonText, context: contextText, amount: rewardAmount };
+  }
+
+  function isLogPowerClaimButton(button) {
+    return Boolean(logPowerClaimButtonInfo(button));
+  }
+
+  function findLogPowerClaimButtonInfos(root = document) {
     const source = root instanceof Element || root === document ? root : document;
     const buttons = source.querySelectorAll ? Array.from(source.querySelectorAll("button")) : [];
     if (source instanceof HTMLButtonElement) {
       buttons.unshift(source);
     }
-    return buttons.filter(isLogPowerClaimButton);
+    return buttons.map(logPowerClaimButtonInfo).filter(Boolean);
+  }
+
+  function findLogPowerClaimButtons(root = document) {
+    return findLogPowerClaimButtonInfos(root).map((info) => info.button);
   }
 
   function hasLogPowerClaimButton(node) {
@@ -461,21 +583,93 @@
     if (!options.logPower || !isLivePage()) {
       return 0;
     }
-    const buttons = findLogPowerClaimButtons();
-    buttons.forEach((button) => {
+    const now = Date.now();
+    const buttonInfos = findLogPowerClaimButtonInfos();
+    if (buttonInfos.length || now - logPowerLastScanDebugAt >= LOG_POWER_DEBUG_SCAN_IDLE_MS) {
+      logPowerLastScanDebugAt = now;
+      logPowerDebug("button-scan", {
+        candidateCount: buttonInfos.length,
+        sleeping: isLogPowerButtonScanSleeping(),
+        sleepRemainingMs: Math.max(0, logPowerButtonScanSleepUntil - now),
+        candidates: buttonInfos.slice(0, 5).map((info) => compactLogPowerDebugValue(info.text, 120)),
+      });
+    }
+    let clicked = 0;
+    for (const info of buttonInfos.slice(0, 1)) {
+      const { button } = info;
+      if (now - (logPowerClickedButtons.get(button) || 0) < LOG_POWER_RETRY_MS) {
+        logPowerDebug("button-click-skip-repeat", {
+          text: compactLogPowerDebugValue(info.text, 120),
+        });
+        continue;
+      }
       try {
+        logPowerClickedButtons.set(button, now);
         button.click();
+        clicked += 1;
+        logPowerDebug("button-click", {
+          amount: info.amount,
+          text: compactLogPowerDebugValue(info.text, 120),
+          context: compactLogPowerDebugValue(info.context, 180),
+        });
       } catch (error) {
         console.info("MoneCapture log power button click skipped", error);
+        logPowerDebug("button-click-error", {
+          text: compactLogPowerDebugValue(info.text, 120),
+          error: error?.message || String(error),
+        });
       }
+    }
+    return clicked;
+  }
+
+  function isLogPowerButtonScanSleeping() {
+    return logPowerButtonScanSleepUntil > Date.now();
+  }
+
+  function sleepLogPowerButtonScanAfterClick(clicked, reason) {
+    if (!clicked) {
+      return;
+    }
+    logPowerButtonScanSleepUntil = Date.now() + LOG_POWER_BUTTON_SCAN_SLEEP_MS;
+    logPowerDebug("button-scan-sleep-set", {
+      clicked,
+      reason,
+      sleepMs: LOG_POWER_BUTTON_SCAN_SLEEP_MS,
     });
-    return buttons.length;
   }
 
   function stopLogPowerMonitor() {
     window.clearTimeout(logPowerTimer);
     logPowerTimer = 0;
+    window.clearTimeout(logPowerButtonScanTimer);
+    logPowerButtonScanTimer = 0;
     logPowerBusy = false;
+  }
+
+  function scheduleLogPowerButtonScan(delay = LOG_POWER_BUTTON_SCAN_MS) {
+    window.clearTimeout(logPowerButtonScanTimer);
+    logPowerButtonScanTimer = 0;
+    if (extensionDisposed || !options.logPower || !isLivePage()) {
+      return;
+    }
+    const sleepRemaining = logPowerButtonScanSleepUntil - Date.now();
+    if (sleepRemaining > 0) {
+      delay = Math.max(delay, sleepRemaining);
+      logPowerDebug("button-scan-sleep", {
+        sleepRemainingMs: Math.round(sleepRemaining),
+        nextScanMs: Math.round(delay),
+      });
+    }
+    logPowerButtonScanTimer = window.setTimeout(() => {
+      logPowerButtonScanTimer = 0;
+      const clicked = claimVisibleLogPowerButtons();
+      if (clicked > 0) {
+        sleepLogPowerButtonScanAfterClick(clicked, "button-scan");
+        window.setTimeout(() => refreshLogPower({ force: true }).catch(handleAsyncError), LOG_POWER_CLAIM_REFRESH_MS);
+      }
+      scheduleLogPowerButtonScan();
+    }, Math.max(0, delay));
   }
 
   function scheduleLogPowerMonitor(delay = LOG_POWER_CHECK_MS) {
@@ -483,8 +677,10 @@
     logPowerTimer = 0;
     if (extensionDisposed || !options.logPower || !isLivePage()) {
       removeLogPowerBadge();
+      stopLogPowerMonitor();
       return;
     }
+    scheduleLogPowerButtonScan();
     logPowerTimer = window.setTimeout(() => {
       logPowerTimer = 0;
       refreshLogPower().catch(handleAsyncError);
@@ -502,7 +698,7 @@
     }
     logPowerBusy = true;
     try {
-      const clickedButtons = claimVisibleLogPowerButtons();
+      logPowerDebug("api-start", { force });
       const response = await fetch(`https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channelId)}/log-power`, {
         credentials: "include",
       });
@@ -517,27 +713,45 @@
       ensureLogPowerBadge(logPowerAmount);
 
       const claims = Array.isArray(content.claims) ? content.claims : [];
-      const claimTargets = claims.filter((claim) => claim?.claimId);
-      let claimed = clickedButtons > 0;
-      if (claimTargets.length > 0) {
-        for (const claim of claimTargets) {
-          const claimResponse = await fetch(`https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channelId)}/log-power/claims/${encodeURIComponent(claim.claimId)}`, {
-            method: "PUT",
-            credentials: "include",
-          });
-          if (claimResponse.ok) {
-            claimed = true;
-            ensureLogPowerBadge(logPowerAmount, "claimed");
-          }
+      const hasWatchHourClaim = claims.some((claim) => claim?.claimType === "WATCH_1_HOUR");
+      logPowerDebug("api-result", {
+        amount: logPowerAmount,
+        claimCount: claims.length,
+        claimTypes: claims.map((claim) => claim?.claimType || "unknown"),
+        hasWatchHourClaim,
+        scanSleeping: isLogPowerButtonScanSleeping(),
+        scanSleepRemainingMs: Math.max(0, logPowerButtonScanSleepUntil - Date.now()),
+      });
+      let clickedButtons = 0;
+      if (hasWatchHourClaim) {
+        logPowerButtonScanSleepUntil = 0;
+        logPowerDebug("watch-hour-wake", { reason: "api-claim" });
+        clickedButtons = claimVisibleLogPowerButtons();
+        if (!clickedButtons) {
+          logPowerDebug("watch-hour-no-button-yet");
+          scheduleLogPowerButtonScan(0);
         }
+      } else if (!isLogPowerButtonScanSleeping()) {
+        clickedButtons = claimVisibleLogPowerButtons();
+      }
+      let claimed = clickedButtons > 0;
+      const skippedClaimTypes = claims
+        .filter((claim) => claim?.claimId && claim.claimType !== "WATCH_1_HOUR")
+        .map((claim) => claim?.claimType || "unknown");
+      if (skippedClaimTypes.length > 0) {
+        logPowerDebug("api-claim-skip-non-watch", {
+          claimTypes: skippedClaimTypes,
+        });
       }
       if (claimed) {
+        sleepLogPowerButtonScanAfterClick(clickedButtons, hasWatchHourClaim ? "api-watch-hour" : "api-visible-button");
         window.setTimeout(() => refreshLogPower({ force: true }).catch(handleAsyncError), LOG_POWER_CLAIM_REFRESH_MS);
       }
       scheduleLogPowerMonitor(force ? LOG_POWER_RETRY_MS : LOG_POWER_CHECK_MS);
     } catch (error) {
       ensureLogPowerBadge(logPowerAmount, "error");
       scheduleLogPowerMonitor(LOG_POWER_RETRY_MS);
+      logPowerDebug("api-error", { error: error?.message || String(error) });
       if (!moneIsExtensionContextInvalidated(error)) {
         console.info("MoneCapture log power", error);
       }
@@ -3119,6 +3333,9 @@
     if (!logPowerTimer && options.logPower && isLivePage()) {
       scheduleLogPowerMonitor(LOG_POWER_CHECK_MS);
     }
+    if (!logPowerButtonScanTimer && options.logPower && isLivePage()) {
+      scheduleLogPowerButtonScan();
+    }
     scheduleDelayedFrameWarmMonitor();
     scheduleUiHealthCheck();
   }
@@ -3154,9 +3371,15 @@
         handleUnsupportedPage();
         return;
       }
+      logPowerDebug("loaded", {
+        logPower: options.logPower,
+        livePage: isLivePage(),
+        saveMode: options.saveMode,
+      });
       ensureShortcutListeners();
       scheduleInjection();
       scheduleLogPowerMonitor(0);
+      scheduleLogPowerButtonScan(0);
       scheduleDelayedFrameWarmMonitor();
       scheduleUiHealthCheck(0);
       warmDelayedFrameCacheIfNeeded();
@@ -3178,6 +3401,7 @@
           ensureShortcutListeners();
           scheduleInjection();
           scheduleLogPowerMonitor(0);
+          scheduleLogPowerButtonScan(0);
           scheduleDelayedFrameWarmMonitor();
           scheduleUiHealthCheck(0);
         } else {

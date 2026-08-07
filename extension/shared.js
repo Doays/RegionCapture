@@ -1,4 +1,5 @@
 const MONE_OPTIONS_KEY = "moneOptions";
+const MONE_LOG_POWER_DEBUG_KEY = "moneLogPowerDebugEvents";
 const MONE_SCREENSHOT_DELAY_DEFAULT_SECONDS = 1;
 const MONE_SCREENSHOT_DELAY_MIN_SECONDS = 0.01;
 const MONE_SCREENSHOT_DELAY_MAX_SECONDS = 5;
@@ -57,6 +58,7 @@ const MONE_DEFAULT_OPTIONS = {
   lowLatencyTargetSeconds: MONE_LOW_LATENCY_TARGET_DEFAULT_SECONDS,
   lowLatencyCheckSeconds: MONE_LOW_LATENCY_CHECK_DEFAULT_SECONDS,
   logPower: true,
+  logPowerDebug: true,
   toolbarVisible: true,
   screenshotDelay: true,
   screenshotDelaySeconds: MONE_SCREENSHOT_DELAY_DEFAULT_SECONDS,
@@ -208,6 +210,7 @@ function moneNormalizeOptions(options) {
   const legacyLowLatencyCheckSeconds = normalized.lowLatencyCheckMs == null ? undefined : Number(normalized.lowLatencyCheckMs) / 1000;
   normalized.lowLatencyCheckSeconds = moneNormalizeLowLatencyCheckSeconds(normalized.lowLatencyCheckSeconds ?? legacyLowLatencyCheckSeconds);
   delete normalized.lowLatencyCheckMs;
+  normalized.logPowerDebug = Boolean(normalized.logPowerDebug);
   normalized.continuousCapture = Boolean(normalized.continuousCapture);
   const legacyContinuousInterval = normalized.continuousCaptureIntervalMs;
   normalized.continuousInstantCaptureIntervalMs = moneNormalizeContinuousCaptureIntervalMs(normalized.continuousInstantCaptureIntervalMs ?? legacyContinuousInterval);
